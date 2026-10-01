@@ -1,4 +1,4 @@
-```python
+
 """
 StudySpark AI - Main Streamlit Application
 
