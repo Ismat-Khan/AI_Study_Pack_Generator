@@ -605,19 +605,15 @@ if context:
                 )
 
                options = mcq.get("options", {})
-
-if isinstance(options, dict):
-    for key, value in options.items():
-        st.write(f"**{key}.** {value}")
-
-elif isinstance(options, list):
-    for index, option in enumerate(options):
-        letter = chr(65 + index)
-        st.write(f"**{letter}.** {option}")
-
-else:
-    st.write(str(options))
-
+            if isinstance(options, dict):
+                 for key, value in options.items():
+                      st.write(f"**{key}.** {value}")
+                     elif isinstance(options, list):
+                         for index, option in enumerate(options):
+                             letter = chr(65 + index)
+                             st.write(f"**{letter}.** {option}")
+                             else:
+                                 st.write(str(options))
                 with st.expander("Show answer"):
 
                     st.success(
