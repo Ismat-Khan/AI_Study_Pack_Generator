@@ -1,421 +1,51 @@
-"""
-StudySpark AI - Workflow Engine
-
-This file contains:
-- Shared workflow context
-- Five AI stages
-- Stage orchestration
-- Error recording
-
-The UI stays in app.py.
-The AI API call stays in ai_service.py.
-"""
-
 from dataclasses import dataclass, field
 from typing import Any, Dict, List
-
 from ai_service import ask_ai
-
-
-# ============================================================
-# Shared Context
-# ============================================================
 
 @dataclass
 class WorkflowContext:
-
     topic: str
     source_text: str
     learner_level: str
     learning_goal: str
     pack_type: str
     question_count: int
-
     plan: Dict[str, Any] = field(default_factory=dict)
     content: Dict[str, Any] = field(default_factory=dict)
     assessment: Dict[str, Any] = field(default_factory=dict)
     review: Dict[str, Any] = field(default_factory=dict)
     final_pack: Dict[str, Any] = field(default_factory=dict)
-
     completed_stages: List[str] = field(default_factory=list)
-
     errors: List[Dict[str, str]] = field(default_factory=list)
+    def record_error(self, stage: str, message: str):
+        self.errors.append({"stage": stage, "message": message})
 
-    def record_error(
-        self,
-        stage: str,
-        message: str,
-    ):
-        self.errors.append(
-            {
-                "stage": stage,
-                "message": message,
-            }
-        )
+def create_context(topic, source_text, learner_level, learning_goal, pack_type, question_count):
+    return WorkflowContext(topic.strip(), source_text.strip(), learner_level, learning_goal, pack_type, question_count)
 
+def planning_stage(ctx, api_key):
+    prompt=f'''Create a concise personalized study plan.\nTopic: {ctx.topic}\nStudent level: {ctx.learner_level}\nLearning goal: {ctx.learning_goal}\nStudy material: {ctx.source_text or "No material supplied."}\nReturn ONLY JSON with keys learning_objectives, key_topics, recommended_sequence, difficulty_strategy, content_requirements, assessment_requirements. Keep arrays concise.'''
+    ctx.plan=ask_ai(api_key,"You are an expert instructional designer. Return valid JSON only.",prompt); ctx.completed_stages.append("Planning")
 
-def create_context(
-    topic: str,
-    source_text: str,
-    learner_level: str,
-    learning_goal: str,
-    pack_type: str,
-    question_count: int,
-) -> WorkflowContext:
+def content_stage(ctx, api_key):
+    prompt=f'''Generate concise study content.\nTopic: {ctx.topic}\nStudent level: {ctx.learner_level}\nLearning goal: {ctx.learning_goal}\nLearning plan: {ctx.plan}\nSource material: {ctx.source_text or "No source material supplied."}\nReturn ONLY JSON with exactly these keys: summary, key_concepts, examples, flashcards. key_concepts must contain 4 to 6 objects with concept and explanation. examples 2 to 4 objects with concept and example. flashcards 4 to 6 objects with question and answer. Keep explanations short. No Markdown or text outside JSON.'''
+    ctx.content=ask_ai(api_key,"You are an expert educational content creator. Output JSON only.",prompt); ctx.completed_stages.append("Content Generation")
 
-    return WorkflowContext(
-        topic=topic.strip(),
-        source_text=source_text.strip(),
-        learner_level=learner_level,
-        learning_goal=learning_goal,
-        pack_type=pack_type,
-        question_count=question_count,
-    )
+def assessment_stage(ctx, api_key):
+    prompt=f'''Create an assessment from the study plan and generated content.\nTopic: {ctx.topic}\nStudent level: {ctx.learner_level}\nQuestion count: {ctx.question_count}\nPLAN: {ctx.plan}\nCONTENT: {ctx.content}\nReturn ONLY JSON with keys mcqs, short_questions, long_questions. Create up to {ctx.question_count} in each section. Keep answers concise.'''
+    ctx.assessment=ask_ai(api_key,"You are an expert educational assessment designer. Output JSON only.",prompt); ctx.completed_stages.append("Assessment")
 
+def review_stage(ctx, api_key):
+    prompt=f'''Review this study pack for factual consistency, objective alignment, coverage, difficulty, MCQ correctness, ambiguity, duplicates, and missing explanations. PLAN: {ctx.plan}\nCONTENT: {ctx.content}\nASSESSMENT: {ctx.assessment}\nReturn ONLY JSON with keys overall_status, score, strengths, issues, revision_instructions. Keep it concise.'''
+    ctx.review=ask_ai(api_key,"You are a strict educational quality reviewer. Output JSON only.",prompt); ctx.completed_stages.append("Review")
 
-# ============================================================
-# Stage 1 — Planning
-# ============================================================
+def refinement_stage(ctx, api_key):
+    prompt=f'''Create the final student-ready study pack. PLAN: {ctx.plan}\nCONTENT: {ctx.content}\nASSESSMENT: {ctx.assessment}\nREVIEW: {ctx.review}\nReturn ONLY JSON with keys title, summary, key_concepts, examples, flashcards, mcqs, short_questions, long_questions, study_tips, review_status, quality_score. Keep content concise. Do not mention internal workflow details.'''
+    ctx.final_pack=ask_ai(api_key,"You are the final educational editor. Output JSON only.",prompt); ctx.completed_stages.append("Refinement")
 
-def planning_stage(
-    ctx: WorkflowContext,
-    api_key: str,
-):
+STAGES=["Planning","Content Generation","Assessment","Review","Refinement"]
 
-    prompt = f"""
-Create a personalized study plan.
-
-Student level:
-{ctx.learner_level}
-
-Learning goal:
-{ctx.learning_goal}
-
-Topic:
-{ctx.topic}
-
-Study material:
-{ctx.source_text or "No material supplied. Use general knowledge."}
-
-Return ONLY JSON:
-
-{{
-  "learning_objectives": [],
-  "key_topics": [],
-  "recommended_sequence": [],
-  "difficulty_strategy": "",
-  "content_requirements": [],
-  "assessment_requirements": []
-}}
-"""
-
-    ctx.plan = ask_ai(
-        api_key=api_key,
-        system_prompt=(
-            "You are an expert instructional designer."
-        ),
-        user_prompt=prompt,
-    )
-
-    ctx.completed_stages.append("Planning")
-
-
-# ============================================================
-# Stage 2 — Content Generation
-# ============================================================
-
-def content_stage(
-    ctx: WorkflowContext,
-    api_key: str,
-):
-
-    prompt = f"""
-Generate study content using this learning plan.
-
-Topic:
-{ctx.topic}
-
-Student level:
-{ctx.learner_level}
-
-Learning goal:
-{ctx.learning_goal}
-
-PLAN:
-{ctx.plan}
-
-SOURCE MATERIAL:
-{ctx.source_text or "No source material supplied."}
-
-Return ONLY JSON:
-
-{{
-  "summary": "",
-  "key_concepts": [
-    {{
-      "concept": "",
-      "explanation": ""
-    }}
-  ],
-  "examples": [
-    {{
-      "concept": "",
-      "example": ""
-    }}
-  ],
-  "flashcards": [
-    {{
-      "question": "",
-      "answer": ""
-    }}
-  ]
-}}
-
-The content must follow the learning objectives.
-"""
-
-    ctx.content = ask_ai(
-        api_key=api_key,
-        system_prompt=(
-            "You are an expert educational content creator."
-        ),
-        user_prompt=prompt,
-    )
-
-    ctx.completed_stages.append("Content Generation")
-
-
-# ============================================================
-# Stage 3 — Assessment
-# ============================================================
-
-def assessment_stage(
-    ctx: WorkflowContext,
-    api_key: str,
-):
-
-    prompt = f"""
-Create an assessment from the plan and generated content.
-
-Topic:
-{ctx.topic}
-
-Student level:
-{ctx.learner_level}
-
-Question count:
-{ctx.question_count}
-
-PLAN:
-{ctx.plan}
-
-CONTENT:
-{ctx.content}
-
-Return ONLY JSON:
-
-{{
-  "mcqs": [
-    {{
-      "question": "",
-      "options": {{
-        "A": "",
-        "B": "",
-        "C": "",
-        "D": ""
-      }},
-      "answer": "A",
-      "explanation": ""
-    }}
-  ],
-  "short_questions": [
-    {{
-      "question": "",
-      "answer": ""
-    }}
-  ],
-  "long_questions": [
-    {{
-      "question": "",
-      "answer": ""
-    }}
-  ]
-}}
-
-Questions must test the actual generated content.
-"""
-
-    ctx.assessment = ask_ai(
-        api_key=api_key,
-        system_prompt=(
-            "You are an expert educational assessment designer."
-        ),
-        user_prompt=prompt,
-    )
-
-    ctx.completed_stages.append("Assessment")
-
-
-# ============================================================
-# Stage 4 — Review
-# ============================================================
-
-def review_stage(
-    ctx: WorkflowContext,
-    api_key: str,
-):
-
-    prompt = f"""
-Review this study pack.
-
-PLAN:
-{ctx.plan}
-
-CONTENT:
-{ctx.content}
-
-ASSESSMENT:
-{ctx.assessment}
-
-Check:
-
-- factual consistency
-- learning-objective alignment
-- important-topic coverage
-- difficulty
-- MCQ correctness
-- ambiguity
-- duplicate questions
-- missing explanations
-- unsupported claims
-
-Return ONLY JSON:
-
-{{
-  "overall_status": "pass or needs_revision",
-  "score": 0,
-  "strengths": [],
-  "issues": [
-    {{
-      "severity": "high|medium|low",
-      "area": "",
-      "problem": "",
-      "recommended_fix": ""
-    }}
-  ],
-  "revision_instructions": []
-}}
-"""
-
-    ctx.review = ask_ai(
-        api_key=api_key,
-        system_prompt=(
-            "You are a strict educational quality reviewer."
-        ),
-        user_prompt=prompt,
-    )
-
-    ctx.completed_stages.append("Review")
-
-
-# ============================================================
-# Stage 5 — Refinement
-# ============================================================
-
-def refinement_stage(
-    ctx: WorkflowContext,
-    api_key: str,
-):
-
-    prompt = f"""
-Create the final student-ready study pack.
-
-PLAN:
-{ctx.plan}
-
-CONTENT:
-{ctx.content}
-
-ASSESSMENT:
-{ctx.assessment}
-
-REVIEW:
-{ctx.review}
-
-Apply the important fixes identified by the reviewer.
-
-Return ONLY JSON:
-
-{{
-  "title": "",
-  "summary": "",
-  "key_concepts": [],
-  "examples": [],
-  "flashcards": [],
-  "mcqs": [],
-  "short_questions": [],
-  "long_questions": [],
-  "study_tips": [],
-  "review_status": "",
-  "quality_score": 0
-}}
-
-Do not mention internal workflow details.
-"""
-
-    ctx.final_pack = ask_ai(
-        api_key=api_key,
-        system_prompt=(
-            "You are the final educational editor. "
-            "Produce accurate, clear, student-ready material."
-        ),
-        user_prompt=prompt,
-    )
-
-    ctx.completed_stages.append("Refinement")
-
-
-# ============================================================
-# Stage Registry
-# ============================================================
-
-STAGES = [
-    "Planning",
-    "Content Generation",
-    "Assessment",
-    "Review",
-    "Refinement",
-]
-
-
-# ============================================================
-# Stage Runner
-# ============================================================
-
-def run_stage(
-    context: WorkflowContext,
-    stage_name: str,
-    api_key: str,
-) -> WorkflowContext:
-
-    stage_functions = {
-        "Planning": planning_stage,
-        "Content Generation": content_stage,
-        "Assessment": assessment_stage,
-        "Review": review_stage,
-        "Refinement": refinement_stage,
-    }
-
-    function = stage_functions.get(stage_name)
-
-    if function is None:
-        raise ValueError(
-            f"Unknown workflow stage: {stage_name}"
-        )
-
-    function(
-        context,
-        api_key,
-    )
-
-    return context
+def run_stage(context, stage_name, api_key):
+    funcs={"Planning":planning_stage,"Content Generation":content_stage,"Assessment":assessment_stage,"Review":review_stage,"Refinement":refinement_stage}
+    if stage_name not in funcs: raise ValueError(f"Unknown workflow stage: {stage_name}")
+    funcs[stage_name](context,api_key); return context
